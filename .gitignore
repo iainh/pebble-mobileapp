@@ -2,6 +2,7 @@
 /build
 /.idea
 /.gradle
+/.amp/portals/*
 **.DS_Store
 /.kotlin
 **/build/
@@ -13,6 +14,7 @@
 **/xcshareddata/WorkspaceSettings.xcsettings
 *.podspec
 *.jks
+/androidApp/src/google-services.json
 iosApp/iosApp.xcodeproj/xcuserdata
 iosApp/iosApp.xcworkspace/xcuserdata
 iosApp/iosApp/GoogleService-Info.plist

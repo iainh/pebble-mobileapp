@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ! -f local.properties ]] || ! grep -Eq '^sdk\.dir=' local.properties; then
+    printf 'sdk.dir=%s\n' "$HOME/Android/Sdk" >> local.properties
+fi
+
+if [[ ! -f androidApp/src/google-services.json ]]; then
+    cp androidApp/src/google-services-dummy.json androidApp/src/google-services.json
+fi

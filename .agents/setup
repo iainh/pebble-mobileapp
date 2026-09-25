@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+step() {
+    local label="$1"
+    shift
+    echo "==> $label"
+    time "$@"
+}
+
+install_system_packages() {
+    local packages=(openjdk-17-jdk-headless)
+    local missing=()
+    local package
+
+    for package in "${packages[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -Fq 'install ok installed'; then
+            missing+=("$package")
+        fi
+    done
+
+    if ((${#missing[@]})); then
+        sudo apt-get update
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+    fi
+}
+
+install_android_command_line_tools() (
+    local tools_url="https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip"
+    local tools_sha1="e025545c62a8e64c7559119566a569fb1dec5f60"
+    local archive
+    local unpack_dir
+
+    if [[ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]]; then
+        return
+    fi
+
+    archive="$(mktemp)"
+    unpack_dir="$(mktemp -d)"
+    trap 'rm -f "$archive"; rm -rf "$unpack_dir"' EXIT
+
+    curl --fail --location --retry 3 --output "$archive" "$tools_url"
+    echo "$tools_sha1  $archive" | sha1sum --check --status
+    unzip -q "$archive" -d "$unpack_dir"
+    mkdir -p "$ANDROID_HOME/cmdline-tools"
+    rm -rf "$ANDROID_HOME/cmdline-tools/latest"
+    mv "$unpack_dir/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+)
+
+configure_login_shell() {
+    local marker="# pebble-mobileapp Android SDK"
+
+    if ! grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null; then
+        cat >> "$HOME/.bash_profile" <<'EOF'
+
+# pebble-mobileapp Android SDK
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+EOF
+    fi
+}
+
+prepare_repository() {
+    if git rev-parse --is-shallow-repository | grep -Fqx true; then
+        git fetch --quiet --unshallow --tags origin
+    elif ! git describe --tags --abbrev=0 HEAD >/dev/null 2>&1; then
+        git fetch --quiet --tags origin
+    fi
+
+    if [[ ! -f local.properties ]] || ! grep -Eq '^sdk\.dir=' local.properties; then
+        printf 'sdk.dir=%s\n' "$ANDROID_HOME" >> local.properties
+    fi
+
+    if [[ ! -f androidApp/src/google-services.json ]]; then
+        cp androidApp/src/google-services-dummy.json androidApp/src/google-services.json
+    fi
+}
+
+warm_gradle_dependencies() {
+    ./gradlew --no-daemon --max-workers=2 --quiet \
+        :androidApp:dependencies --configuration debugRuntimeClasspath >/dev/null
+}
+
+step "Install system packages" install_system_packages
+
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+
+step "Install Android command-line tools" install_android_command_line_tools
+step "Configure login shell" configure_login_shell
+
+(set +o pipefail; yes | sdkmanager --licenses >/dev/null)
+step "Install Android SDK packages" sdkmanager \
+    "platform-tools" \
+    "platforms;android-37.0" \
+    "build-tools;36.0.0" \
+    "ndk;28.2.13676358"
+
+step "Prepare repository configuration" prepare_repository
+step "Warm Gradle dependencies" warm_gradle_dependencies
